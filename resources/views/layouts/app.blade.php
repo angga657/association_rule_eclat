@@ -17,11 +17,8 @@
     <div class="flex h-screen">
         <!-- Sidebar -->
         <div class="w-64 bg-purple-700 text-white">
-            <div class="p-4">
-                <h1 class="text-xl font-bold flex items-center">
-                    <i class="fas fa-project-diagram mr-2"></i>
-                    Association Rule ECLAT
-                </h1>
+            <div class="p-1">
+                <img src="{{ asset('Images/Logo.png') }}" class="w-28 h-auto mx-auto">
             </div>
                 <nav class="mt-8">
                 <a href="{{ route('beranda') }}" class="flex items-center px-6 py-3 text-white hover:bg-purple-800 transition {{ request()->routeIs('beranda') ? 'sidebar-active' : '' }}">
@@ -36,9 +33,9 @@
                     <i class="fas fa-cogs w-5 mr-3"></i>
                     <span>Data Proses</span>
                 </a>
-                <a href="{{ route('data-uji') }}" class="flex items-center px-6 py-3 text-white hover:bg-purple-800 transition {{ request()->routeIs('data-uji') ? 'sidebar-active' : '' }}">
+                <a href="{{ route('data-hasil') }}" class="flex items-center px-6 py-3 text-white hover:bg-purple-800 transition {{ request()->routeIs('data-uji') ? 'sidebar-active' : '' }}">
                     <i class="fas fa-vial w-5 mr-3"></i>
-                    <span>Data Uji</span>
+                    <span>Data Hasil</span>
                 </a>
             </nav>
         </div>

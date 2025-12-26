@@ -26,7 +26,7 @@
                 <p class="text-gray-600 text-sm">Proses data dengan algoritma Eclat</p>
             </a>
             
-            <a href="{{ route('data-uji') }}" class="bg-green-50 rounded-lg p-6 text-center hover:shadow-md transition">
+            <a href="{{ route('data-hasil') }}" class="bg-green-50 rounded-lg p-6 text-center hover:shadow-md transition">
                 <div class="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                     <i class="fas fa-vial text-green-600 text-2xl"></i>
                 </div>

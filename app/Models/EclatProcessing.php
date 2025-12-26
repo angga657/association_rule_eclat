@@ -12,6 +12,7 @@ class EclatProcessing extends Model
     protected $table = 'eclat_processing'; // SUDAH BENAR - singular
     
     protected $fillable = [
+        'batch_year',
         'start_date',
         'end_date',
         'min_support',

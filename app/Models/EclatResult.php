@@ -12,11 +12,13 @@ class EclatResult extends Model
     protected $table = 'eclat_results'; // Pastikan ini benar
     
     protected $fillable = [
-        'itemset',
+        'processing_id',
+        'itemset',        // 🔥 WAJIB
+        'rule_from',
+        'rule_to',
         'support',
         'confidence',
         'lift_ratio',
-        'processing_id',
     ];
     
     protected $casts = [

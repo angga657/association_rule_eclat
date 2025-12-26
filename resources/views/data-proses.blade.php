@@ -19,12 +19,6 @@
         </div>
     @endif
     
-    @if(session('info'))
-        <div class="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-6">
-            <i class="fas fa-info-circle mr-2"></i>
-            {{ session('info') }}
-        </div>
-    @endif
     
     @if(session('success'))
         <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-6">
@@ -41,25 +35,34 @@
         <form action="{{ route('data-proses.submit') }}" method="POST" id="processingForm">
             @csrf
             
+            <!-- Batch Filter -->
+            <div class="mb-4">
+                <label class="font-semibold">Batch Tahun</label>
+                <select id="batch_year" name="batch_year"
+                    class="w-full border rounded px-3 py-2" required>
+                    <option value="">-- Pilih Batch --</option>
+                    <option value="all">Semua Tahun</option>
+                    @foreach($batchYears as $year)
+                        <option value="{{ $year }}">{{ $year }}</option>
+                    @endforeach
+                </select>
+            </div>
             <!-- Date Filter -->
-            <div class="mb-6 p-4 bg-blue-50 rounded-lg">
-                <h4 class="font-semibold mb-3 text-blue-800">
-                    <i class="fas fa-calendar-alt mr-2"></i>Filter Tanggal
-                </h4>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block mb-2 text-sm font-medium text-gray-700">Tanggal Mulai</label>
-                        <input type="date" name="start_date" id="startDate" class="w-full border rounded-lg px-3 py-2">
-                    </div>
-                    <div>
-                        <label class="block mb-2 text-sm font-medium text-gray-700">Tanggal Selesai</label>
-                        <input type="date" name="end_date" id="endDate" class="w-full border rounded-lg px-3 py-2">
-                    </div>
+            <div class="mb-4">
+                <label class="font-semibold">Rentang Tanggal</label>
+
+                <div class="flex gap-2">
+                    <input type="date" id="start_date" name="start_date"
+                        class="border rounded px-3 py-2 w-full">
+
+                    <input type="date" id="end_date" name="end_date"
+                        class="border rounded px-3 py-2 w-full">
                 </div>
-                <div class="mt-3 flex items-center">
-                    <input type="checkbox" id="useAllDates" name="useAllDates" class="mr-2" value="1">
-                    <label for="useAllDates" class="text-sm text-gray-600">Gunakan semua tanggal</label>
-                </div>
+
+                <label class="inline-flex items-center mt-2">
+                    <input type="checkbox" id="useAllDates" name="useAllDates" value="1">
+                    <span class="ml-2">Gunakan seluruh tanggal dalam batch</span>
+                </label>
             </div>
 
             <!-- Category & Division -->
@@ -99,13 +102,13 @@
                     <div>
                         <label class="block mb-2 text-sm font-medium text-gray-700">Min Support</label>
                         <div class="relative">
-                            <input type="number" name="min_support" step="0.01" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.1">
+                            <input type="number" name="min_support" step="0.0001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.1">
                         </div>
                     </div>
                     <div>
                         <label class="block mb-2 text-sm font-medium text-gray-700">Min Confidence</label>
                         <div class="relative">
-                            <input type="number" name="min_confidence" step="0.01" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.8">
+                            <input type="number" name="min_confidence" step="0.0001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.8">
                         </div>
                     </div>
                 </div>
@@ -154,12 +157,11 @@
         <table class="min-w-full table-auto">
             <thead class="bg-gray-100">
                 <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID Transaksi</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tanggal</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kategori</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Divisi</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Jumlah Transaksi</th>
+                    <th class="px-4 py-2">No</th>
+                    <th class="px-4 py-2">Items</th>
+                    <th class="px-4 py-2">Divisi</th>
+                    <th class="px-4 py-2">Kategori</th>
+                    <th class="px-4 py-2 text-center">Jumlah Transaksi</th>
                 </tr>
             </thead>
             <tbody id="transactionTableBody" class="bg-white divide-y divide-gray-200">
@@ -172,9 +174,12 @@
             </tbody>
         </table>
 
-        <div class="flex justify-between items-center mt-4">
-            <div>Menampilkan <span id="currentItemCount">0</span> dari <span id="totalItemCount">0</span> data</div>
-            <div id="pagination-container"></div>
+        <div id="paginationContainer" class="mt-4"></div>
+
+        <div>
+            Showing <span id="currentItemCount">0</span>
+            to <span id="currentItemTo">0</span>
+            of <span id="totalItemCount">0</span> entries
         </div>
     </div>
 
@@ -186,272 +191,224 @@
 </div>
 
 <script>
-/* ============================================================
-   BACKEND DATA (KATEGORI PER DIVISI)
-============================================================ */
 const kategoriByDivisi = @json($kategoriByDivisi);
 
-/* ============================================================
-   SET DEFAULT DATE + LOAD DATA ON START
-============================================================ */
-document.addEventListener('DOMContentLoaded', function() {
+/* ===============================
+   Reset 
+=============================== */
+function resetForm() {
 
-    // FORCE dropdown aktif saat load
-    document.getElementById('useAllCategories').checked = false;
-    document.getElementById('divisiFilter').disabled = false;
-    document.getElementById('kategoriFilter').disabled = false;
+    // Reset form native
+    document.getElementById('processingForm').reset();
 
-    const today = new Date();
-    const thirty = new Date(today);
-    thirty.setDate(today.getDate() - 30);
+    // ===== STATE DEFAULT =====
+    useAllDates.checked = true;
+    useAllCategories.checked = false;
 
-    document.getElementById('startDate').value = thirty.toISOString().split('T')[0];
-    document.getElementById('endDate').value = today.toISOString().split('T')[0];
+    // Aktifkan filter
+    divisiFilter.disabled = false;
+    kategoriFilter.disabled = false;
 
-    loadPreviewData();
+    kategoriFilter.innerHTML = '<option value="">-- Semua Kategori --</option>';
 
-    setupPaginationListener();
-});
+    // 🔥 BATCH KEMBALI KE PILIH BATCH
+    batch_year.value = '';
 
-/* ============================================================
-   UPDATE KATEGORI SAAT DIVISI DIGANTI
-============================================================ */
-document.getElementById('divisiFilter').addEventListener('change', function () {
-    const kategoriSelect = document.getElementById('kategoriFilter');
-    const selectedDivisi = this.value;
+    // Reset tanggal
+    start_date.value = '';
+    end_date.value = '';
 
-    kategoriSelect.innerHTML = '<option value="">-- Semua Kategori --</option>';
+    // ===== RESET TABEL =====
+    transactionTableBody.innerHTML = `
+        <tr>
+            <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                <i class="fas fa-database text-2xl mb-2"></i>
+                <p>Pilih batch untuk menampilkan data</p>
+            </td>
+        </tr>
+    `;
 
-    if (selectedDivisi && kategoriByDivisi[selectedDivisi]) {
-        kategoriByDivisi[selectedDivisi].forEach(k => {
-            kategoriSelect.innerHTML += `<option value="${k}">${k}</option>`;
-        });
-    }
+    paginationContainer.innerHTML = '';
+    currentItemCount.textContent = 0;
+    currentItemTo.textContent = 0;
+    totalItemCount.textContent = 0;
 
-    loadPreviewData();
-});
+    emptyState.classList.add('hidden');
+    dataTableContainer.classList.remove('hidden');
 
-/* ============================================================
-   HANDLE KATEGORI DIGANTI
-============================================================ */
-document.getElementById('kategoriFilter').addEventListener('change', function () {
-    const selectedDivisi = document.getElementById('divisiFilter').value;
-    const selectedKategori = this.value;
-
-    if (selectedKategori && selectedDivisi && !kategoriByDivisi[selectedDivisi]?.includes(selectedKategori)) {
-
-        document.getElementById('divisiFilter').value = '';
-
-        const kategoriSelect = document.getElementById('kategoriFilter');
-        kategoriSelect.innerHTML = '<option value="">-- Semua Kategori --</option>';
-
-        const allCats = [...new Set([].concat(...Object.values(kategoriByDivisi)))];
-        allCats.forEach(k => kategoriSelect.innerHTML += `<option value="${k}">${k}</option>`);
-    }
-
-    loadPreviewData();
-});
-
-/* ============================================================
-   HANDLE CHECKBOX ALL CATEGORIES
-============================================================ */
-document.getElementById('useAllCategories').addEventListener('change', function () {
-    const divisi = document.getElementById('divisiFilter');
-    const kategori = document.getElementById('kategoriFilter');
-
-    const isChecked = this.checked;
-
-    divisi.disabled = isChecked;
-    kategori.disabled = isChecked;
-
-    // jika uncheck → reload kategori sesuai divisi terpilih
-    if (!isChecked) {
-        divisi.dispatchEvent(new Event('change'));
-    }
-
-    loadPreviewData();
-});
-
-/* ============================================================
-   HANDLE CHECKBOX ALL DATES
-============================================================ */
-document.getElementById('useAllDates').addEventListener('change', loadPreviewData);
-
-/* ============================================================
-   HANDLE DATE RANGE CHANGE
-============================================================ */
-document.getElementById('startDate').addEventListener('change', loadPreviewData);
-document.getElementById('endDate').addEventListener('change', loadPreviewData);
-
-/* ============================================================
-   RENDER DATA KE TABEL
-============================================================ */
-function renderPreviewData(result) {
-    const loading = document.getElementById('loadingState');
-    const empty = document.getElementById('emptyState');
-    const tableBox = document.getElementById('dataTableContainer');
-    const tbody = document.getElementById('transactionTableBody');
-    const curr = document.getElementById('currentItemCount');
-    const total = document.getElementById('totalItemCount');
-    const paging = document.getElementById('pagination-container');
-
-    if (result.success && result.data.length > 0) {
-        loading.classList.add('hidden');
-        empty.classList.add('hidden');
-        tableBox.classList.remove('hidden');
-
-        tbody.innerHTML = result.data
-            .map(item => `
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 font-medium">${item.id_trx}</td>
-                    <td class="px-4 py-3">${item.tanggal}</td>
-                    <td class="px-4 py-3">
-                        <div class="max-w-xs truncate" title="${item.items.join(', ')}">
-                            ${item.items.join(', ')}
-                        </div>
-                    </td>
-                    <td class="px-4 py-3">${item.kategori}</td>
-                    <td class="px-4 py-3">${item.divisi}</td>
-                    <td class="px-4 py-3">${item.jumlah_transaksi}</td>
-                </tr>
-        `).join('');
-
-        curr.textContent = `${result.from} - ${result.to}`;
-        total.textContent = result.total;
-
-        paging.innerHTML = result.pagination;
-        setupPaginationListener();
-    } else {
-        loading.classList.add('hidden');
-        tableBox.classList.add('hidden');
-        empty.classList.remove('hidden');
-        total.textContent = 0;
-    }
+    // ⛔ JANGAN loadPreviewData()
 }
 
-/* ============================================================
-   LOAD PREVIEW DATA (AJAX)
-============================================================ */
-async function loadPreviewData(page = 1) {
+/* ===============================
+   Scroll 
+=============================== */
+function scrollToTable() {
+    const table = document.getElementById('dataTableContainer');
+    if (!table) return;
 
-    const start = document.getElementById('startDate').value;
-    const end = document.getElementById('endDate').value;
+    const yOffset = -20; // offset kecil biar tidak terlalu mepet
+    const y = table.getBoundingClientRect().top + window.pageYOffset + yOffset;
 
-    const useAllDates = document.getElementById('useAllDates').checked;
-    const useAllCategories = document.getElementById('useAllCategories').checked;
-
-    const divisi = document.getElementById('divisiFilter').value;
-    const kategori = document.getElementById('kategoriFilter').value;
-
-    updateFilterInfo(start, end, useAllDates, divisi, kategori, useAllCategories);
-
-    document.getElementById('loadingState').classList.remove('hidden');
-    document.getElementById('dataTableContainer').classList.add('hidden');
-    document.getElementById('emptyState').classList.add('hidden');
-
-    try {
-        const params = new URLSearchParams({
-            page,
-            per_page: 10
-        });
-
-        if (!useAllDates) {
-            params.append('start_date', start);
-            params.append('end_date', end);
-        }
-
-        if (useAllCategories) {
-            params.append('useAllCategories', 'true');
-        } else {
-            if (divisi) params.append('divisi', divisi);
-            if (kategori) params.append('kategori', kategori);
-        }
-
-        const response = await fetch(`{{ route('api.transactions.filtered') }}?${params}`, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        const result = await response.json();
-        renderPreviewData(result);
-
-    } catch (err) {
-        console.error(err);
-        document.getElementById('emptyState').classList.remove('hidden');
-    }
-}
-
-/* ============================================================
-   PAGINATION TANPA REFRESH + ANTI JUMPING
-============================================================ */
-function setupPaginationListener() {
-    const box = document.getElementById('pagination-container');
-
-    box.onclick = function (event) {
-        const link = event.target.closest('a');
-        if (!link) return;
-
-        event.preventDefault();
-        link.blur();
-
-        const page = new URL(link.href).searchParams.get('page');
-        if (page) loadPreviewData(Number(page));
-    };
-}
-
-/* ============================================================
-   UPDATE LABEL FILTER
-============================================================ */
-function updateFilterInfo(start, end, allDates, divisi, kategori, allCats) {
-    const dateText = document.getElementById('dateFilterInfo');
-    const catText = document.getElementById('categoryFilterInfo');
-
-    if (allDates) {
-        dateText.textContent = "Semua tanggal";
-    } else {
-        dateText.textContent = `${formatDate(start)} - ${formatDate(end)}`;
-    }
-
-    if (allCats) {
-        catText.textContent = "Semua kategori & divisi";
-    } else if (divisi && kategori) {
-        catText.textContent = `${divisi} - ${kategori}`;
-    } else if (divisi) {
-        catText.textContent = `Divisi: ${divisi}`;
-    } else {
-        catText.textContent = "Filter kategori dipilih";
-    }
-}
-
-function formatDate(d) {
-    return new Date(d).toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
+    window.scrollTo({
+        top: y,
+        behavior: 'smooth'
     });
 }
 
-/* ============================================================
-   RESET FORM
-============================================================ */
-function resetForm() {
-    const form = document.getElementById('processingForm');
-    form.reset();
 
-    document.getElementById('useAllDates').checked = false;
-    document.getElementById('useAllCategories').checked = false;
-
-    const today = new Date();
-    const thirty = new Date(today);
-    thirty.setDate(today.getDate() - 30);
-
-    document.getElementById('startDate').value = thirty.toISOString().split('T')[0];
-    document.getElementById('endDate').value = today.toISOString().split('T')[0];
-
-    document.getElementById('divisiFilter').disabled = false;
-    document.getElementById('kategoriFilter').disabled = false;
-
+/* ===============================
+   ON LOAD
+=============================== */
+document.addEventListener('DOMContentLoaded', () => {
+    useAllDates.checked = true;
+    batch_year.value = 'all';
     loadPreviewData();
+});
+
+/* ===============================
+   EVENT LISTENER
+=============================== */
+batch_year.addEventListener('change', () => {
+    useAllDates.checked = true;
+    start_date.value = '';
+    end_date.value = '';
+    loadPreviewData();
+});
+
+useAllDates.addEventListener('change', () => {
+    if (useAllDates.checked) {
+        start_date.value = '';
+        end_date.value = '';
+    }
+    loadPreviewData();
+});
+
+start_date.addEventListener('change', () => {
+    useAllDates.checked = false;
+    loadPreviewData();
+});
+
+end_date.addEventListener('change', () => {
+    useAllDates.checked = false;
+    loadPreviewData();
+});
+
+divisiFilter.addEventListener('change', function () {
+    kategoriFilter.innerHTML = '<option value="">-- Semua Kategori --</option>';
+    if (this.value && kategoriByDivisi[this.value]) {
+        kategoriByDivisi[this.value].forEach(k => {
+            kategoriFilter.innerHTML += `<option value="${k}">${k}</option>`;
+        });
+    }
+    loadPreviewData();
+});
+
+kategoriFilter.addEventListener('change', loadPreviewData);
+
+useAllCategories.addEventListener('change', function () {
+    divisiFilter.disabled = this.checked;
+    kategoriFilter.disabled = this.checked;
+    loadPreviewData();
+});
+
+/* ===============================
+   AJAX PREVIEW (FIX ALL BATCH)
+=============================== */
+async function loadPreviewData(page = 1) {
+
+    if (!batch_year.value) return;
+
+    loadingState.classList.remove('hidden');
+    dataTableContainer.classList.add('hidden');
+    emptyState.classList.add('hidden');
+
+    const params = new URLSearchParams({
+        page,
+        useAllDates: useAllDates.checked ? 1 : 0,
+        useAllCategories: useAllCategories.checked ? 1 : 0
+    });
+
+    // 🔥 BATCH: kirim hanya kalau bukan "all"
+    if (batch_year.value !== 'all') {
+        params.append('batch_year', batch_year.value);
+    }
+
+    if (!useAllDates.checked && start_date.value && end_date.value) {
+        params.append('start_date', start_date.value);
+        params.append('end_date', end_date.value);
+    }
+
+    if (!useAllCategories.checked) {
+        if (divisiFilter.value) params.append('divisi', divisiFilter.value);
+        if (kategoriFilter.value) params.append('kategori', kategoriFilter.value);
+    }
+
+    try {
+        const res = await fetch(`{{ route('api.transactions.filtered') }}?${params}`);
+        const result = await res.json();
+        renderPreviewData(result);
+    } catch (e) {
+        console.error(e);
+        loadingState.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+    }
+}
+
+/* ===============================
+   RENDER TABLE
+=============================== */
+function renderPreviewData(result) {
+
+    loadingState.classList.add('hidden');
+
+    if (result.success && result.data.length) {
+
+        dataTableContainer.classList.remove('hidden');
+        emptyState.classList.add('hidden');
+
+        transactionTableBody.innerHTML = result.data.map((row, i) => `
+            <tr>
+                <td class="px-4 py-2 text-center">${i + result.from}</td>
+                <td class="px-4 py-2 text-center">${row.items.join(', ')}</td>
+                <td class="px-4 py-2 text-center">${row.divisi}</td>
+                <td class="px-4 py-2 text-center">${row.kategori}</td>
+                <td class="px-4 py-2 text-center font-bold">${row.jumlah_transaksi}</td>
+            </tr>
+        `).join('');
+
+        currentItemCount.textContent = result.from;
+        currentItemTo.textContent = result.to;
+        totalItemCount.textContent = result.total;
+
+        // 🔥 TAMPILKAN PAGINATION
+        paginationContainer.innerHTML = result.pagination || '';
+
+        bindPaginationLinks();
+
+    } else {
+        dataTableContainer.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        paginationContainer.innerHTML = '';
+        totalItemCount.textContent = 0;
+    }
+
+}
+function bindPaginationLinks() {
+    document.querySelectorAll('#paginationContainer a').forEach(link => {
+        link.addEventListener('click', function (e) {
+            e.preventDefault();
+
+            const url = new URL(this.href);
+            const page = url.searchParams.get('page');
+
+            loadPreviewData(page);
+
+            // 🔥 FIX SCROLL
+            scrollToTable();
+        });
+    });
 }
 </script>
+
 
 @endsection

@@ -2,35 +2,27 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\TransactionFilterService;
+use App\Models\Transaction;
 use App\Models\EclatProcessing;
 use App\Models\EclatResult;
-use App\Models\Transaction;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class ProcessingController extends Controller
 {
-    /**
-     * Display the data proses page.
-     */
-    public function index()
+    /* ===============================
+       HALAMAN DATA PROSES
+       =============================== */
+    public function index(Request $request)
     {
-        // Default: show last 30 days
-        $today = now();
-        $thirtyDaysAgo = now()->subDays(30);
-        
-        $startDate = $thirtyDaysAgo->format('Y-m-d');
-        $endDate = $today->format('Y-m-d');
-        
-        // Get unique divisi from database
-        $divisiList = Transaction::distinct('divisi')
-            ->whereNotNull('divisi')
+      $divisiList = Transaction::whereNotNull('divisi')
             ->where('divisi', '!=', '')
+            ->distinct()
             ->pluck('divisi')
             ->sort()
             ->values();
-        
-        // Get kategori grouped by divisi
+
         $kategoriByDivisi = Transaction::select('divisi', 'kategori')
             ->whereNotNull('divisi')
             ->whereNotNull('kategori')
@@ -39,256 +31,268 @@ class ProcessingController extends Controller
             ->distinct()
             ->get()
             ->groupBy('divisi')
-            ->map(function ($item) {
-                return $item->pluck('kategori')->sort()->values();
-            });
-        
-        // Tidak perlu preview data lagi, karena akan diambil via AJAX
-        return view('data-proses', compact('startDate', 'endDate', 'divisiList', 'kategoriByDivisi'));
+            ->map(fn ($item) => $item->pluck('kategori')->sort()->values());
+
+        $batchYears = Transaction::select('batch_year')
+            ->distinct()
+            ->orderByDesc('batch_year')
+            ->pluck('batch_year');
+
+        return view('data-proses', compact(
+            'divisiList',
+            'kategoriByDivisi',
+            'batchYears'
+        ));
     }
 
-    /**
-    * Process the data with ECLAT algorithm.
-    */
+    /* ===============================
+       PREVIEW DATA (AJAX)
+       TIDAK UBAH TAMPILAN
+       =============================== */
+    public function preview(Request $request)
+    {
+        $query = TransactionFilterService::query($request->all())
+            ->select(
+                'items',
+                DB::raw('COUNT(DISTINCT id_trx) as jumlah_transaksi'),
+                DB::raw('GROUP_CONCAT(DISTINCT divisi SEPARATOR ", ") as divisi'),
+                DB::raw('GROUP_CONCAT(DISTINCT kategori SEPARATOR ", ") as kategori')
+            );
+
+        $transactions = $query
+            ->groupBy('items')
+            ->orderByDesc('jumlah_transaksi')
+            ->paginate($request->get('per_page', 10))
+            ->appends($request->query());
+
+        /* ===============================
+        FILTER BATCH (AMAN)
+        =============================== */
+        if ($request->filled('batch_year')) {
+            $query->where('batch_year', $request->batch_year);
+        }
+        // ❗ jika batch_year TIDAK ADA → semua tahun
+
+        /* ===============================
+        FILTER TANGGAL
+        =============================== */
+        if (!$request->boolean('useAllDates') &&
+            $request->filled('start_date') &&
+            $request->filled('end_date')) {
+
+            $query->whereBetween('tanggal', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date . ' 23:59:59'
+            ]);
+        }
+
+        /* ===============================
+        FILTER DIVISI & KATEGORI
+        =============================== */
+        if (!$request->boolean('useAllCategories')) {
+            if ($request->filled('divisi')) {
+                $query->where('divisi', $request->divisi);
+            }
+
+            if ($request->filled('kategori')) {
+                $query->where('kategori', $request->kategori);
+            }
+        }
+
+        $transactions = $query
+            ->groupBy('items')
+            ->orderByDesc('jumlah_transaksi')
+            ->paginate($request->get('per_page', 10))
+            ->appends($request->query());
+
+        $data = $transactions->getCollection()->map(function ($trx) {
+            return [
+                'items' => array_map('trim', explode(',', $trx->items)),
+                'divisi' => $trx->divisi,
+                'kategori' => $trx->kategori,
+                'jumlah_transaksi' => $trx->jumlah_transaksi,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+            'pagination' => $transactions->links()->toHtml(),
+            'from' => $transactions->firstItem() ?? 0,
+            'to' => $transactions->lastItem() ?? 0,
+            'total' => $transactions->total(),
+        ]);
+    }
+
+    /* ===============================
+       PROSES ECLAT (VERTIKAL)
+       =============================== */
     public function process(Request $request)
     {
-        try {
-            $validator = Validator::make($request->all(), [
-                'min_support' => 'required|numeric|min:0|max:1',
-                'min_confidence' => 'required|numeric|min:0|max:1',
-                'start_date' => 'required|date',
-                'end_date' => 'required|date|after_or_equal:start_date',
-            ]);
+        $request->validate([
+            'batch_year'     => 'required',
+            'min_support'    => 'required|numeric|min:0|max:1',
+            'min_confidence' => 'required|numeric|min:0|max:1',
+        ]);
 
-            if ($validator->fails()) {
-                return redirect()->back()
-                    ->withErrors($validator)
-                    ->withInput()
-                    ->with('error', 'Validasi gagal. Silakan periksa kembali input Anda.');
-            }
+        $transactions = TransactionFilterService::query($request->all())->get();
 
-            // Get filtered transactions based on filters
-            $query = Transaction::query();
-            
-            // Date filter
-            if (!$request->has('useAllDates')) {
-                $query->whereBetween('tanggal', [$request->start_date . ' 00:00:00', $request->end_date . ' 23:59:59']);
-            }
-            
-            // Category & Division filter
-            if (!$request->has('useAllCategories')) {
-                if ($request->filled('divisi')) {
-                    $query->where('divisi', $request->divisi);
-                }
-                if ($request->filled('kategori')) {
-                    $query->where('kategori', $request->kategori);
-                }
-            }
-            
-            // Get transactions with duplicate ID_Trx
-            $duplicateTransactions = $this->getTransactionsWithDuplicateId($query);
-            
-            if ($duplicateTransactions->isEmpty()) {
-                return redirect()->back()
-                    ->with('error', 'Tidak ada data transaksi yang memenuhi kriteria filter. Silakan pilih filter yang berbeda.')
-                    ->withInput();
-            }
-            
-            // Show processing message
-            session()->flash('info', 'Sedang memproses data dengan algoritma ECLAT...');
-            
-            // Run ECLAT algorithm
-            $eclatResults = $this->runEclatAlgorithm(
-                $duplicateTransactions, 
-                $request->min_support, 
-                $request->min_confidence
-            );
-            
-            if ($eclatResults->isEmpty()) {
-                return redirect()->back()
-                    ->with('warning', 'Tidak ada aturan asosiasi yang ditemukan dengan parameter yang diberikan. Silakan coba dengan nilai support/confidence yang lebih rendah.')
-                    ->withInput();
-            }
-            
-            // Save processing parameters (handle null values)
+        if ($transactions->isEmpty()) {
+            return back()->with('error', 'Tidak ada transaksi');
+        }
+
+        $eclat = $this->runEclatAlgorithm(
+            $transactions,
+            $request->min_support,
+            $request->min_confidence
+        );
+
+        $singleItemsets = $eclat['single'];
+        $rules          = $eclat['rules'];
+
+        if ($rules->isEmpty()) {
+            return back()->with('warning', 'Tidak ada association rule');
+        }
+
+        DB::transaction(function () use (
+            $request,
+            $transactions,
+            $singleItemsets,
+            $rules
+        ) {
+
+            // ✅ 1️⃣ PROCESSING
             $processing = EclatProcessing::create([
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'min_support' => $request->min_support,
-                'min_confidence' => $request->min_confidence,
-                'kategori' => $request->filled('kategori') ? $request->kategori : null,
-                'divisi' => $request->filled('divisi') ? $request->divisi : null,
-                'jenis_trx' => $request->filled('jenis_trx') ? $request->jenis_trx : null,
-                'customer_type' => $request->filled('customer_type') ? $request->customer_type : null,
-                'total_transactions' => $duplicateTransactions->count(),
+                'batch_year' => $request->batch_year === 'all'
+                    ? null
+                    : $request->batch_year,
+
+                'start_date'         => $request->start_date,
+                'end_date'           => $request->end_date,
+                'min_support'        => $request->min_support,
+                'min_confidence'     => $request->min_confidence,
+                'total_transactions' => $transactions->groupBy('id_trx')->count(),
             ]);
-            
-            // Save ECLAT results
-            $savedResults = 0;
-            foreach ($eclatResults as $result) {
+
+            // 🔥 2️⃣ SINGLE ITEMSET (1-ITEMSET)
+            foreach ($singleItemsets as $item => $data) {
                 EclatResult::create([
                     'processing_id' => $processing->id,
-                    'itemset' => $result['itemset'],
-                    'support' => $result['support'],
-                    'confidence' => $result['confidence'],
-                    'lift_ratio' => $result['lift_ratio'],
+                    'itemset'       => $item,
+                    'rule_from'     => null,
+                    'rule_to'       => null,
+                    'support'       => $data['support'],
+                    'confidence'    => null,
+                    'lift_ratio'    => null,
                 ]);
-                $savedResults++;
             }
-            
-            session()->flash('success', 'Data berhasil diproses dengan algoritma ECLAT! Ditemukan ' . $savedResults . ' aturan asosiasi dari ' . $duplicateTransactions->count() . ' transaksi.');
-            
-            return redirect()->route('data-proses')->withInput();
-            
-        } catch (\Exception $e) {
-            \Log::error('Error in process: ' . $e->getMessage());
-            
-            return redirect()->back()
-                ->with('error', 'Terjadi kesalahan saat memproses data: ' . $e->getMessage())
-                ->withInput();
-        }
+
+            // 🔥 3️⃣ ASSOCIATION RULE (2-ITEMSET)
+            foreach ($rules as $row) {
+                EclatResult::create([
+                    'processing_id' => $processing->id,
+                    'itemset'       => null,
+                    'rule_from'     => $row['rule_from'],
+                    'rule_to'       => $row['rule_to'],
+                    'support'       => $row['support'],
+                    'confidence'    => $row['confidence'],
+                    'lift_ratio'    => $row['lift_ratio'],
+                ]);
+            }
+        });
+
+        return redirect()
+            ->route('data-hasil')
+            ->with('success', 'ECLAT berhasil diproses');
     }
-    
-    /**
-     * Get transactions with duplicate ID_Trx
-     */
-    private function getTransactionsWithDuplicateId($query)
-    {
-        // Get all transactions with the same ID_Trx
-        $subquery = Transaction::select('id_trx')
-            ->groupBy('id_trx')
-            ->havingRaw('COUNT(*) > 1');
-            
-        return $query->whereIn('id_trx', $subquery)
-            ->orderBy('id_trx')
-            ->get();
-    }
-    
-    /**
-     * Run ECLAT algorithm (PHP implementation)
-     */
+
+    /* ===============================
+       ECLAT CORE (VERTIKAL)
+       =============================== */
     private function runEclatAlgorithm($transactions, $minSupport, $minConfidence)
     {
-        // Convert to array for easier processing
-        $transactionsArray = $transactions->toArray();
-        $totalTransactions = count($transactionsArray);
-        
-        // Create vertical format: item => [transaction_ids]
-        $verticalData = [];
-        
-        foreach ($transactionsArray as $transaction) {
-            $items = explode(',', $transaction['items']);
-            $idTrx = $transaction['id_trx'];
-            
-            foreach ($items as $item) {
-                $item = trim($item);
-                if (!isset($verticalData[$item])) {
-                    $verticalData[$item] = [];
-                }
-                
-                if (!in_array($idTrx, $verticalData[$item])) {
-                    $verticalData[$item][] = $idTrx;
+        $grouped = $transactions->groupBy('id_trx');
+        $totalTransactions = $grouped->count();
+
+        // 1️⃣ Vertical representation
+        $vertical = [];
+
+        foreach ($grouped as $trxId => $rows) {
+            foreach ($rows as $row) {
+                foreach (explode(',', $row->items) as $item) {
+                    $item = trim($item);
+                    $vertical[$item][] = $trxId;
                 }
             }
         }
-        
-        // Calculate support for each item (frequent 1-itemsets)
-        $frequentItemsets = [];
-        
-        foreach ($verticalData as $item => $transactionIds) {
-            $support = count($transactionIds) / $totalTransactions;
-            
+
+        foreach ($vertical as &$ids) {
+            $ids = array_unique($ids);
+        }
+
+        // 2️⃣ Frequent 1-itemset
+        $freq = [];
+        foreach ($vertical as $item => $ids) {
+            $support = count($ids) / $totalTransactions;
             if ($support >= $minSupport) {
-                $frequentItemsets[$item] = [
-                    'transaction_ids' => $transactionIds,
+                $freq[$item] = [
+                    'ids' => $ids,
                     'support' => $support
                 ];
             }
         }
-        
-        // Generate results array
+
         $results = [];
-        
-        // 1. Add single itemsets (frequent 1-itemsets)
-        foreach ($frequentItemsets as $item => $data) {
-            $results[] = [
-                'itemset' => $item,
-                'support' => $data['support'],
-                'confidence' => 1.0, // Single item selalu memiliki confidence 1.0
-                'lift_ratio' => 1.0, // Single item selalu memiliki lift 1.0
-                'type' => 'single' // Tambahkan tipe untuk membedakan
-            ];
-        }
-        
-        // 2. Generate 2-itemsets and calculate confidence and lift
-        $items = array_keys($frequentItemsets);
-        $itemCount = count($items);
-        
-        for ($i = 0; $i < $itemCount; $i++) {
-            for ($j = $i + 1; $j < $itemCount; $j++) {
-                $itemA = $items[$i];
-                $itemB = $items[$j];
-                
-                // Find common transaction IDs
-                $commonIds = array_intersect(
-                    $frequentItemsets[$itemA]['transaction_ids'],
-                    $frequentItemsets[$itemB]['transaction_ids']
+        $items = array_keys($freq);
+
+        // 3️⃣ Generate 2-itemset (ECLAT core)
+        for ($i = 0; $i < count($items); $i++) {
+            for ($j = $i + 1; $j < count($items); $j++) {
+
+                $A = $items[$i];
+                $B = $items[$j];
+
+                $intersect = array_intersect(
+                    $freq[$A]['ids'],
+                    $freq[$B]['ids']
                 );
-                
-                if (empty($commonIds)) {
-                    continue;
-                }
-                
-                $supportAB = count($commonIds) / $totalTransactions;
-                
-                if ($supportAB < $minSupport) {
-                    continue;
-                }
-                
-                // Calculate confidence: P(B|A) = support(A∩B) / support(A)
-                $confidenceAtoB = $supportAB / $frequentItemsets[$itemA]['support'];
-                $confidenceBtoA = $supportAB / $frequentItemsets[$itemB]['support'];
-                
-                // Calculate lift: lift(A,B) = support(A∩B) / (support(A) * support(B))
-                $lift = $supportAB / ($frequentItemsets[$itemA]['support'] * $frequentItemsets[$itemB]['support']);
-                
-                // Add rules that meet minimum confidence
-                if ($confidenceAtoB >= $minConfidence) {
+
+                $supAB = count($intersect) / $totalTransactions;
+                if ($supAB < $minSupport) continue;
+
+                $confAB = $supAB / $freq[$A]['support'];
+                if ($confAB >= $minConfidence) {
+                    $lift = $supAB / ($freq[$A]['support'] * $freq[$B]['support']);
+
+                    // A → B
                     $results[] = [
-                        'itemset' => "{$itemA} → {$itemB}",
-                        'support' => $supportAB,
-                        'confidence' => $confidenceAtoB,
+                        'rule_from'  => $A,
+                        'rule_to'    => $B,
+                        'support'    => $supAB,
+                        'confidence' => $confAB,
                         'lift_ratio' => $lift,
-                        'type' => 'pair'
                     ];
                 }
-                
-                if ($confidenceBtoA >= $minConfidence) {
+
+                $confBA = $supAB / $freq[$B]['support'];
+                if ($confBA >= $minConfidence) {
+                    $lift = $supAB / ($freq[$A]['support'] * $freq[$B]['support']);
+
+                    // B → A
                     $results[] = [
-                        'itemset' => "{$itemB} → {$itemA}",
-                        'support' => $supportAB,
-                        'confidence' => $confidenceBtoA,
+                        'rule_from'  => $B,
+                        'rule_to'    => $A,
+                        'support'    => $supAB,
+                        'confidence' => $confBA,
                         'lift_ratio' => $lift,
-                        'type' => 'pair'
                     ];
                 }
             }
         }
-        
-        // Sort by lift ratio descending, but put single items first
-        usort($results, function($a, $b) {
-            // Single items selalu di atas
-            if ($a['type'] === 'single' && $b['type'] !== 'single') {
-                return -1;
-            }
-            if ($b['type'] === 'single' && $a['type'] !== 'single') {
-                return 1;
-            }
-            
-            // Untuk tipe yang sama, sort berdasarkan lift ratio
-            return $b['lift_ratio'] <=> $a['lift_ratio'];
-        });
-        
-        return collect($results);
+
+        return [
+            'single' => $freq,
+            'rules'  => collect($results)->sortByDesc('lift_ratio')->values()
+        ];
     }
 }

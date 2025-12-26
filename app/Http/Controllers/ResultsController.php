@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Request;
+use App\Services\TransactionFilterService;
 use App\Models\EclatProcessing;
 use App\Models\EclatResult;
 
@@ -10,43 +12,59 @@ class ResultsController extends Controller
     /**
      * Display the data uji page.
      */
-    public function index()
+    public function index(Request $request)
     {
-        try {
-            $processing = EclatProcessing::latest()->first();
-            $results = collect([]);
+        $batch = $request->query('batch');
 
-            $singleItemsets = collect([]);
-            $pairItemsets = collect([]);
+        $processing = EclatProcessing::when(
+            $batch && $batch !== 'all',
+            fn($q) => $q->where('batch_year', $batch)
+        )->latest()->first();
 
-            if ($processing) {
-                $results = $processing->results()->get();
+        $singleItemsets = collect();
+        $pairItemsets   = collect();
 
-                // Pisahkan single & pair berdasarkan karakter '→'
-                $singleItemsets = $results->filter(function($r){
-                    return !str_contains($r->itemset, '→');
+        if ($processing) {
+
+            // ===============================
+            // 🔥 SINGLE ITEMSET (BENAR)
+            // ===============================
+            $singleItemsets = $processing->results()
+                ->whereNull('rule_from')
+                ->whereNull('rule_to')
+                ->where(function ($q) {
+                    $q->whereNotNull('itemset')
+                    ->where('itemset', '!=', '');
+                })
+                ->orderByDesc('support')
+                ->get()
+                ->map(function ($item) {
+                    $item->support_percent = $item->support * 100;
+                    return $item;
                 });
+                
 
-                $pairItemsets = $results->filter(function($r){
-                    return str_contains($r->itemset, '→');
+            // ===============================
+            // 🔥 PAIR ITEMSET / ASSOCIATION RULE
+            // ===============================
+            $pairItemsets = $processing->results()
+                ->whereNotNull('rule_from')
+                ->whereNotNull('rule_to')
+                ->whereColumn('rule_from', '!=', 'rule_to')
+                ->where('lift_ratio', '>', 1)
+                ->orderByDesc('support')
+                ->get()
+                ->map(function ($item) {
+                    $item->support_percent     = $item->support * 100;
+                    $item->confidence_percent  = $item->confidence * 100;
+                    return $item;
                 });
-            }
-
-            return view('data-uji', compact(
-                'results', 'processing',
-                'singleItemsets', 'pairItemsets'
-            ));
-
-        } catch (\Exception $e) {
-            \Log::error('Error in dataUji: ' . $e->getMessage());
-
-            return view('data-uji', [
-                'results' => collect([]),
-                'singleItemsets' => collect([]),
-                'pairItemsets' => collect([]),
-                'processing' => null,
-                'error' => 'Terjadi kesalahan: ' . $e->getMessage()
-            ]);
         }
+
+        return view('data-hasil', compact(
+            'processing',
+            'singleItemsets',
+            'pairItemsets'
+        ));
     }
 }

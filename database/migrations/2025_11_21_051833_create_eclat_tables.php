@@ -14,8 +14,9 @@ return new class extends Migration
         // Create eclat_processing table first
         Schema::create('eclat_processing', function (Blueprint $table) {
             $table->id();
-            $table->date('start_date');
-            $table->date('end_date');
+            $table->date('start_date')->nullable();
+            $table->date('end_date')->nullable();
+            $table->smallInteger('batch_year')->nullable();
             $table->decimal('min_support', 4, 3);
             $table->decimal('min_confidence', 4, 3);
             $table->string('kategori')->nullable();
@@ -32,23 +33,25 @@ return new class extends Migration
         // Create eclat_results table second
         Schema::create('eclat_results', function (Blueprint $table) {
             $table->id();
-            $table->string('itemset');
+
+            $table->foreignId('processing_id')
+                  ->constrained('eclat_processing')
+                  ->cascadeOnDelete();
+
+            $table->string('rule_from'); // A
+            $table->string('rule_to');   // B
+
             $table->decimal('support', 8, 6);
             $table->decimal('confidence', 8, 6);
             $table->decimal('lift_ratio', 8, 6);
-            $table->unsignedBigInteger('processing_id');
+
             $table->timestamps();
-            
-            // Add foreign key constraint
-            $table->foreign('processing_id')
-                  ->references('id')
-                  ->on('eclat_processing')
-                  ->onDelete('cascade');
-            
-            $table->index(['processing_id']);
-            $table->index(['support']);
-            $table->index(['confidence']);
-            $table->index(['lift_ratio']);
+
+            // Mencegah duplicate A→B
+            $table->unique(
+                ['processing_id', 'rule_from', 'rule_to'],
+                'unique_eclat_rule'
+            );
         });
     }
 
