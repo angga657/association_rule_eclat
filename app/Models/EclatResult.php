@@ -13,18 +13,26 @@ class EclatResult extends Model
     
     protected $fillable = [
         'processing_id',
-        'itemset',        // 🔥 WAJIB
+        'itemset',
         'rule_from',
         'rule_to',
         'support',
         'confidence',
         'lift_ratio',
+        'trx',
+        'trx_A',     // 🔥 WAJIB
+        'trx_B',     // 🔥 WAJIB
+        'trx_AB',    // 🔥 WAJIB
     ];
     
     protected $casts = [
         'support' => 'decimal:6',
         'confidence' => 'decimal:6',
         'lift_ratio' => 'decimal:6',
+        'trx' => 'integer',
+        'trx_A' => 'integer',
+        'trx_B' => 'integer',
+        'trx_AB' => 'integer',
     ];
     
     public function processing()

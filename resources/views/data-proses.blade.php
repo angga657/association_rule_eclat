@@ -102,18 +102,22 @@
                     <div>
                         <label class="block mb-2 text-sm font-medium text-gray-700">Min Support</label>
                         <div class="relative">
-                            <input type="number" name="min_support" step="0.0001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.1">
+                            <input type="number" name="min_support" step="0.00001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.1">
                         </div>
                     </div>
                     <div>
                         <label class="block mb-2 text-sm font-medium text-gray-700">Min Confidence</label>
                         <div class="relative">
-                            <input type="number" name="min_confidence" step="0.0001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.8">
+                            <input type="number" name="min_confidence" step="0.00001" min="0" max="1" class="w-full border rounded-lg px-3 py-2" value="0.1">
                         </div>
                     </div>
                 </div>
             </div>
             
+            <div class="font-semibold ">
+                Total Transaksi: 
+                <span id="totalTrxUnik">0</span> Transaksi
+            </div>
             <!-- Action Buttons -->
             <div class="flex items-center justify-between">
                 <div class="text-sm text-gray-600">
@@ -141,7 +145,7 @@
             </div>
             <div class="text-green-800">
                 <i class="fas fa-tags mr-2"></i>
-                <span id="categoryFilterInfo">Semua kategori & divisi</span>
+                <span id="categoryFilterInfo">Semua Divisi & Kategori</span>
             </div>
         </div>
     </div>
@@ -176,10 +180,14 @@
 
         <div id="paginationContainer" class="mt-4"></div>
 
-        <div>
-            Showing <span id="currentItemCount">0</span>
-            to <span id="currentItemTo">0</span>
-            of <span id="totalItemCount">0</span> entries
+        <div class="text-sm text-gray-700 space-y-1">
+            <div>
+                Showing <span id="currentItemCount">0</span>
+                to <span id="currentItemTo">0</span>
+                of <span id="totalItemCount">0</span> entries
+            </div>
+
+            
         </div>
     </div>
 
@@ -379,6 +387,7 @@ function renderPreviewData(result) {
         currentItemCount.textContent = result.from;
         currentItemTo.textContent = result.to;
         totalItemCount.textContent = result.total;
+        document.getElementById('totalTrxUnik').textContent = result.total_trx_unik ?? 0;
 
         // 🔥 TAMPILKAN PAGINATION
         paginationContainer.innerHTML = result.pagination || '';

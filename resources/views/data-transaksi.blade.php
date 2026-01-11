@@ -48,7 +48,7 @@
             <div class="mb-4">
                 <label class="block mb-2 text-sm font-medium text-gray-700">Pilih File CSV</label>
                 <input type="file" name="csv_file" class="w-full border rounded-lg px-3 py-2" accept=".csv" required>
-                <p class="mt-2 text-sm text-gray-500">Format file harus CSV dengan header yang sesuai. Maksimal ukuran file: 10MB.</p>
+                <p class="mt-2 text-sm text-gray-500">Format file harus CSV dengan header yang sesuai.</p>
             </div>
             <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
                 <i class="fas fa-upload mr-2"></i>Upload Data
@@ -66,8 +66,16 @@
                 </button>
             </div>
         </div>
+
+        <div id="total-trx-info" class="font-semibold text-gray-700">
+            Total Transaksi: {{ $totalTrx }} Transaksi
+            @if(request('batch_year'))
+                (Batch {{ request('batch_year') }})
+            @endif
+        </div>
+
         
-        <div class="flex justify-between mb-4">
+        <div class="flex justify-between mb-4 mt-4">
             <div class="flex items-center">
                 <label class="mr-2">Show</label>
                 <select id="per_page" class="border rounded px-3 py-1">
@@ -104,9 +112,7 @@
             </div>
             
             <div class="flex justify-between items-center mt-4">
-                <div>
-                    Showing {{ $transactions->firstItem() }} to {{ $transactions->lastItem() }} of {{ $transactions->total() }} entries
-                </div>
+                <div></div>
                 <div id="pagination-links">
                     {{ $transactions->links() }}
                 </div>
@@ -183,6 +189,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
             tableBody.innerHTML = data.table_body;
             paginationLinks.innerHTML = data.pagination;
+            
+            const totalInfo = document.getElementById('total-trx-info');
+            if (totalInfo && data.total_trx !== undefined) {
+                const batch = document.getElementById('batch_year').value;
+                totalInfo.innerHTML =
+                    `Total Transaksi: ${data.total_trx} Transaksi` +
+                    (batch ? ` (Batch ${batch})` : '');
+            }
 
             if (preserveScroll) {
                 requestAnimationFrame(() => {

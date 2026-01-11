@@ -69,8 +69,10 @@ class TransactionController extends Controller
                     compact('transactions', 'totalTrx')
                 )->render(),
                 'pagination' => $transactions->links()->toHtml(),
+                'total_trx' => $totalTrx   // <<< INI WAJIB
             ]);
         }
+
 
         // ===============================
         // NORMAL VIEW
@@ -90,7 +92,7 @@ class TransactionController extends Controller
         ini_set('memory_limit', '1024M');
         set_time_limit(0);
         $validator = Validator::make($request->all(), [
-            'csv_file' => 'required|file|mimes:csv,txt|max:512000', // ~500MB
+            'csv_file' => 'required|file|mimes:csv,txt|max:512000', 
         ]);
 
         if ($validator->fails()) {
