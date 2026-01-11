@@ -93,7 +93,7 @@
                 <tbody>
                     
                     @foreach($pairItemsets as $i => $item)
-                    <tr>
+                    <tr class="border-b">
                         <td class="px-4 py-2 text-center">{{ $i + 1 }}</td>
                         <td class="text-center">{{ $item->rule_from }} → {{ $item->rule_to }}</td>
                         <td class="text-center">{{ $item->trx_A }}</td>
@@ -132,7 +132,7 @@
                 </thead>
                 <tbody>
                     @foreach($singleItemsets as $i => $item)
-                    <tr>
+                    <tr class="border-b">
                         <td class="px-4 py-2 text-center">{{ $i + 1 }}</td>
                         <td class="px-4 py-2 text-center font-semibold">
                             {{ $item->itemset }}
