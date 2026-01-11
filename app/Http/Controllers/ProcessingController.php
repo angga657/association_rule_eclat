@@ -11,6 +11,40 @@ use Illuminate\Http\Request;
 
 class ProcessingController extends Controller
 {
+
+    private function baseFilteredQuery(Request $request)
+    {
+        $query = Transaction::query();
+
+        // BATCH
+        if ($request->filled('batch_year') && $request->batch_year !== 'all') {
+            $query->where('batch_year', $request->batch_year);
+        }
+
+        // TANGGAL
+        if (
+            !$request->boolean('useAllDates') &&
+            $request->filled('start_date') &&
+            $request->filled('end_date')
+        ) {
+            $query->whereBetween('tanggal', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date . ' 23:59:59'
+            ]);
+        }
+
+        // DIVISI & KATEGORI
+        if (!$request->boolean('useAllCategories')) {
+            if ($request->filled('divisi')) {
+                $query->where('divisi', $request->divisi);
+            }
+            if ($request->filled('kategori')) {
+                $query->where('kategori', $request->kategori);
+            }
+        }
+
+        return $query;
+    }
     /* ===============================
        HALAMAN DATA PROSES
        =============================== */
@@ -51,35 +85,29 @@ class ProcessingController extends Controller
        =============================== */
     public function preview(Request $request)
     {
-        $query = TransactionFilterService::query($request->all())
-            ->select(
-                'items',
-                DB::raw('COUNT(DISTINCT id_trx) as jumlah_transaksi'),
-                DB::raw('GROUP_CONCAT(DISTINCT divisi SEPARATOR ", ") as divisi'),
-                DB::raw('GROUP_CONCAT(DISTINCT kategori SEPARATOR ", ") as kategori')
-            );
+        $query = $this->baseFilteredQuery($request);
 
-        $transactions = $query
-            ->groupBy('items')
-            ->orderByDesc('jumlah_transaksi')
-            ->paginate($request->get('per_page', 10))
-            ->appends($request->query());
+        // TOTAL TRANSAKSI UNIK (UNTUK INFO BAWAH)
+        $totalTransaksiUnik = (clone $query)
+            ->select('id_trx')
+            ->distinct()
+            ->count('id_trx');
 
         /* ===============================
-        FILTER BATCH (AMAN)
+        FILTER BATCH
         =============================== */
         if ($request->filled('batch_year')) {
             $query->where('batch_year', $request->batch_year);
         }
-        // ❗ jika batch_year TIDAK ADA → semua tahun
 
         /* ===============================
         FILTER TANGGAL
         =============================== */
-        if (!$request->boolean('useAllDates') &&
+        if (
+            !$request->boolean('useAllDates') &&
             $request->filled('start_date') &&
-            $request->filled('end_date')) {
-
+            $request->filled('end_date')
+        ) {
             $query->whereBetween('tanggal', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date . ' 23:59:59'
@@ -93,15 +121,27 @@ class ProcessingController extends Controller
             if ($request->filled('divisi')) {
                 $query->where('divisi', $request->divisi);
             }
-
             if ($request->filled('kategori')) {
                 $query->where('kategori', $request->kategori);
             }
         }
 
+        /* ===============================
+        SELECT + GROUP
+        =============================== */
+        $query->select(
+            'items',
+            DB::raw('COUNT(DISTINCT id_trx) as jumlah_transaksi'),
+            DB::raw('GROUP_CONCAT(DISTINCT divisi SEPARATOR ", ") as divisi'),
+            DB::raw('GROUP_CONCAT(DISTINCT kategori SEPARATOR ", ") as kategori')
+        )
+        ->groupBy('items')
+        ->orderByDesc('jumlah_transaksi');
+
+        /* ===============================
+        PAGINATION (SATU KALI)
+        =============================== */
         $transactions = $query
-            ->groupBy('items')
-            ->orderByDesc('jumlah_transaksi')
             ->paginate($request->get('per_page', 10))
             ->appends($request->query());
 
@@ -117,10 +157,11 @@ class ProcessingController extends Controller
         return response()->json([
             'success' => true,
             'data' => $data,
-            'pagination' => $transactions->links()->toHtml(),
+            'pagination' => preg_replace('/<p class="text-sm.*?<\/p>/s', '', $transactions->links()->toHtml()),
             'from' => $transactions->firstItem() ?? 0,
             'to' => $transactions->lastItem() ?? 0,
             'total' => $transactions->total(),
+            'total_trx_unik' => $totalTransaksiUnik,
         ]);
     }
 
@@ -135,7 +176,7 @@ class ProcessingController extends Controller
             'min_confidence' => 'required|numeric|min:0|max:1',
         ]);
 
-        $transactions = TransactionFilterService::query($request->all())->get();
+        $transactions = $this->baseFilteredQuery($request)->get();
 
         if ($transactions->isEmpty()) {
             return back()->with('error', 'Tidak ada transaksi');
@@ -151,7 +192,7 @@ class ProcessingController extends Controller
         $rules          = $eclat['rules'];
 
         if ($rules->isEmpty()) {
-            return back()->with('warning', 'Tidak ada association rule');
+            return back()->with('warning', 'Tidak ada aturan asosiasi yang ditemukan');
         }
 
         DB::transaction(function () use (
@@ -171,6 +212,8 @@ class ProcessingController extends Controller
                 'end_date'           => $request->end_date,
                 'min_support'        => $request->min_support,
                 'min_confidence'     => $request->min_confidence,
+                'divisi'   => $request->filled('divisi') ? $request->divisi : null,
+                'kategori' => $request->filled('kategori') ? $request->kategori : null,
                 'total_transactions' => $transactions->groupBy('id_trx')->count(),
             ]);
 
@@ -179,11 +222,8 @@ class ProcessingController extends Controller
                 EclatResult::create([
                     'processing_id' => $processing->id,
                     'itemset'       => $item,
-                    'rule_from'     => null,
-                    'rule_to'       => null,
                     'support'       => $data['support'],
-                    'confidence'    => null,
-                    'lift_ratio'    => null,
+                    'trx'           => $data['count'], // 🔥 ABSOLUT
                 ]);
             }
 
@@ -191,18 +231,20 @@ class ProcessingController extends Controller
             foreach ($rules as $row) {
                 EclatResult::create([
                     'processing_id' => $processing->id,
-                    'itemset'       => null,
                     'rule_from'     => $row['rule_from'],
                     'rule_to'       => $row['rule_to'],
                     'support'       => $row['support'],
                     'confidence'    => $row['confidence'],
                     'lift_ratio'    => $row['lift_ratio'],
+                    'trx_A'         => $row['trx_A'],
+                    'trx_B'         => $row['trx_B'],
+                    'trx_AB'        => $row['trx_AB'],
                 ]);
             }
         });
 
         return redirect()
-            ->route('data-hasil')
+            ->route('data-hasil', ['batch_year' => $request->batch_year])
             ->with('success', 'ECLAT berhasil diproses');
     }
 
@@ -211,88 +253,121 @@ class ProcessingController extends Controller
        =============================== */
     private function runEclatAlgorithm($transactions, $minSupport, $minConfidence)
     {
+         /* =====================================================
+        1. GROUP TRANSAKSI (BERDASARKAN ID_TRX)
+        ===================================================== */
         $grouped = $transactions->groupBy('id_trx');
         $totalTransactions = $grouped->count();
 
-        // 1️⃣ Vertical representation
+        /* =====================================================
+        2. REPRESENTASI VERTIKAL
+        item => [trx_id1, trx_id2, ...]
+        ===================================================== */
         $vertical = [];
 
         foreach ($grouped as $trxId => $rows) {
+
+            $uniqueItems = [];
+
             foreach ($rows as $row) {
                 foreach (explode(',', $row->items) as $item) {
                     $item = trim($item);
-                    $vertical[$item][] = $trxId;
+                    if ($item !== '') {
+                        $uniqueItems[$item] = true;
+                    }
                 }
+            }
+
+            foreach (array_keys($uniqueItems) as $item) {
+                $vertical[$item][] = $trxId;
             }
         }
 
-        foreach ($vertical as &$ids) {
-            $ids = array_unique($ids);
+        // pastikan tidak ada trx_id ganda
+        foreach ($vertical as $item => $trxIds) {
+            $vertical[$item] = array_values(array_unique($trxIds));
         }
 
-        // 2️⃣ Frequent 1-itemset
+        /* =====================================================
+        3. FREQUENT 1-ITEMSET
+        simpan SUPPORT + COUNT ABSOLUT
+        ===================================================== */
         $freq = [];
-        foreach ($vertical as $item => $ids) {
-            $support = count($ids) / $totalTransactions;
+
+        foreach ($vertical as $item => $trxIds) {
+            $count   = count($trxIds);
+            $support = $count / $totalTransactions;
+
             if ($support >= $minSupport) {
                 $freq[$item] = [
-                    'ids' => $ids,
+                    'ids'     => $trxIds,
+                    'count'   => $count,  
                     'support' => $support
                 ];
             }
         }
 
-        $results = [];
+        /* =====================================================
+        4. ASSOCIATION RULE 2-ITEMSET (A → B)
+        ===================================================== */
+        $rules = [];
         $items = array_keys($freq);
 
-        // 3️⃣ Generate 2-itemset (ECLAT core)
         for ($i = 0; $i < count($items); $i++) {
             for ($j = $i + 1; $j < count($items); $j++) {
 
                 $A = $items[$i];
                 $B = $items[$j];
 
-                $intersect = array_intersect(
+                // A ∩ B
+                $trxAB = array_intersect(
                     $freq[$A]['ids'],
                     $freq[$B]['ids']
                 );
 
-                $supAB = count($intersect) / $totalTransactions;
-                if ($supAB < $minSupport) continue;
+                $countAB   = count($trxAB);
+                $supportAB = $countAB / $totalTransactions;
 
-                $confAB = $supAB / $freq[$A]['support'];
-                if ($confAB >= $minConfidence) {
-                    $lift = $supAB / ($freq[$A]['support'] * $freq[$B]['support']);
-
-                    // A → B
-                    $results[] = [
-                        'rule_from'  => $A,
-                        'rule_to'    => $B,
-                        'support'    => $supAB,
-                        'confidence' => $confAB,
-                        'lift_ratio' => $lift,
-                    ];
+                // cek minimum support
+                if ($supportAB < $minSupport) {
+                    continue;
                 }
 
-                $confBA = $supAB / $freq[$B]['support'];
-                if ($confBA >= $minConfidence) {
-                    $lift = $supAB / ($freq[$A]['support'] * $freq[$B]['support']);
-
-                    // B → A
-                    $results[] = [
-                        'rule_from'  => $B,
-                        'rule_to'    => $A,
-                        'support'    => $supAB,
-                        'confidence' => $confBA,
-                        'lift_ratio' => $lift,
-                    ];
+                // confidence A → B
+                $confidenceAB = $countAB / $freq[$A]['count'];
+                if ($confidenceAB < $minConfidence) {
+                    continue;
                 }
+
+                // lift A → B
+                $liftAB = $supportAB / (
+                    $freq[$A]['support'] * $freq[$B]['support']
+                );
+
+                // SIMPAN A → B
+                $rules[] = [
+                    'rule_from'  => $A,
+                    'rule_to'    => $B,
+                    'support'    => $supportAB,
+                    'confidence' => $confidenceAB,
+                    'lift_ratio' => $liftAB,
+
+                    // 🔥 ANGKA ABSOLUT (UNTUK TABEL HASIL)
+                    'trx_A'  => $freq[$A]['count'],
+                    'trx_B'  => $freq[$B]['count'],
+                    'trx_AB' => $countAB,
+                ];
             }
         }
 
+        /* =====================================================
+        5. RETURN HASIL
+        ===================================================== */
         return [
-            'single' => $freq,
-            'rules'  => collect($results)->sortByDesc('lift_ratio')->values()
+            'single' => $freq, // 1-itemset (dengan count absolut)
+            'rules'  => collect($rules)
+                            ->sortByDesc('lift_ratio')
+                            ->values()
         ];
     }
 }
