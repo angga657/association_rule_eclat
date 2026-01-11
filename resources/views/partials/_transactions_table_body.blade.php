@@ -8,7 +8,7 @@
     <td class="px-4 py-2 text-center">{{ $trx->kategori }}</td>
     <td class="px-4 py-2 text-center">{{ $trx->jumlah_transaksi }}</td>
     <td class="text-center">
-        {{ number_format($trx->jumlah_transaksi / $totalTrx * 100, 2) }}%
+        {{ number_format($trx->jumlah_transaksi / $totalTrx * 100, 3) }}%
     </td>
 </tr>
 @empty
