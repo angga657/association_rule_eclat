@@ -14,57 +14,73 @@ class ResultsController extends Controller
      */
     public function index(Request $request)
     {
-        $batch = $request->query('batch');
+        // ✅ SAMAKAN DENGAN data-proses
+        $rawBatch = $request->query('batch_year');
 
-        $processing = EclatProcessing::when(
-            $batch && $batch !== 'all',
-            fn($q) => $q->where('batch_year', $batch)
-        )->latest()->first();
+        $batchYear = (!$rawBatch || $rawBatch === 'all')
+            ? 'Semua Batch'
+            : $rawBatch;
+        $divisi = $request->query('divisi');
+        $kategori = $request->query('kategori');
+
+        $processing = EclatProcessing::latest()->first();
 
         $singleItemsets = collect();
         $pairItemsets   = collect();
 
         if ($processing) {
 
-            // ===============================
-            // 🔥 SINGLE ITEMSET (BENAR)
-            // ===============================
+            /* ===============================
+               SINGLE ITEMSET
+               =============================== */
             $singleItemsets = $processing->results()
-                ->whereNull('rule_from')
-                ->whereNull('rule_to')
-                ->where(function ($q) {
-                    $q->whereNotNull('itemset')
-                    ->where('itemset', '!=', '');
-                })
-                ->orderByDesc('support')
-                ->get()
-                ->map(function ($item) {
-                    $item->support_percent = $item->support * 100;
-                    return $item;
-                });
-                
+            ->whereNull('rule_from')
+            ->whereNull('rule_to')
+            ->whereNotNull('itemset')
+            ->where('itemset', '!=', '')
+            ->orderByDesc('support')
+            ->get()
+            ->map(function ($item) {
 
-            // ===============================
-            // 🔥 PAIR ITEMSET / ASSOCIATION RULE
-            // ===============================
+                $item->support_percent = $item->support * 100;
+
+                // ✅ LANGSUNG PAKAI HASIL ECLAT
+                $item->trx = $item->trx;
+
+                return $item;
+            });
+
+            $singleIndex = $singleItemsets->keyBy('itemset');
+
+            /* ===============================
+               ASSOCIATION RULE (A → B)
+               =============================== */
             $pairItemsets = $processing->results()
-                ->whereNotNull('rule_from')
-                ->whereNotNull('rule_to')
-                ->whereColumn('rule_from', '!=', 'rule_to')
-                ->where('lift_ratio', '>', 1)
-                ->orderByDesc('support')
-                ->get()
-                ->map(function ($item) {
-                    $item->support_percent     = $item->support * 100;
-                    $item->confidence_percent  = $item->confidence * 100;
-                    return $item;
-                });
+            ->whereNotNull('rule_from')
+            ->whereNotNull('rule_to')
+            ->where('lift_ratio', '>', 1)
+            ->orderByDesc('lift_ratio')
+            ->get()
+            ->map(function ($item) {
+
+                $item->support_percent    = $item->support * 100;
+                $item->confidence_percent = $item->confidence * 100;
+
+                // 🔥 AMBIL HASIL ECLAT VERTIKAL
+                $item->trx_A  = $item->trx_A;
+                $item->trx_B  = $item->trx_B;
+                $item->trx_AB = $item->trx_AB;
+
+                return $item;
+            });
         }
 
+        // ✅ KIRIM batch_year ke view
         return view('data-hasil', compact(
             'processing',
             'singleItemsets',
-            'pairItemsets'
+            'pairItemsets',
+            'batchYear'
         ));
     }
 }
